@@ -83,7 +83,6 @@
             $("#node-config-input-clientSecret").on('change keydown paste input',updateBoxAuthButton);
 
             function updateBoxDisplayName(dn) {
-                $("#node-config-box-client-keys").hide();
                 $("#node-config-box").show();
                 $("#node-config-input-displayName").val(dn);
                 $("#node-config-box-displayName").html(dn);
@@ -101,14 +100,16 @@
                 });
              }
 
+            // we can't get this from the backend safely; if user needs
+            // to re-auth, it must be put in again.
+            $('#node-config-input-clientSecret').val('');
+
             updateBoxAuthButton();
 
             if (this.displayName) {
                 updateBoxDisplayName(this.displayName);
             } else {
-                $("#node-config-box-client-keys").show();
                 $("#node-config-box").hide();
-                $("#node-config-dialog-ok").button("disable");
             }
 
             $("#node-config-start-auth").mousedown(function() {

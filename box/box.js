@@ -14,6 +14,7 @@
  * limitations under the License.
  **/
 
+
 module.exports = function(RED) {
     "use strict";
     var crypto = require("crypto");
@@ -21,9 +22,40 @@ module.exports = function(RED) {
     var request = require("request");
     var url = require("url");
     var minimatch = require("minimatch");
+    var BoxSDK = require('box-node-sdk');
+
+    var AUTH_MODE_OAUTH2 = 'oauth2';
+    var AUTH_MODE_APP = 'app';
+
+    function TokenStore (id) {
+        this.id = id;
+    }
+
+    TokenStore.prototype = {
+        read: function(cb) {
+            var id = this.id;
+            process.nextTick(function () {
+                cb(null, RED.nodes.getCredentials(id));
+            });
+        },
+        write: function(tokenInfo, cb) {
+            var id = this.id;
+            var credentials = RED.nodes.getCredentials(id);
+            Object.assign(credentials, tokenInfo);
+            RED.nodes.addCredentials(id, credentials)
+                .then(function () {
+                    cb();
+                }, cb);
+        },
+        clear: function(cb) {
+            this.write(null, cb);
+        }
+    }
 
     function BoxNode(n) {
         RED.nodes.createNode(this,n);
+
+        this.authMode = n.authMode || AUTH_MODE_OAUTH2;
     }
     RED.nodes.registerType("box-credentials", BoxNode, {
         credentials: {
@@ -32,11 +64,14 @@ module.exports = function(RED) {
             clientSecret: {type:"password"},
             accessToken: {type:"password"},
             refreshToken: {type:"password"},
-            expireTime: {type:"password"}
+            accessTokenTTLMS: {type:"text"},
+            acquiredAtMS: {type: 'text'},
+            publicKeyID: {type: 'text'},
+            privateKey: {type: 'password'}
         }
     });
 
-    BoxNode.prototype.refreshToken = function(cb) {
+    BoxNode.prototype.refreshToken = function() {
         var credentials = this.credentials;
         var node = this;
         //console.log("refreshing token: " + credentials.refreshToken);
@@ -45,40 +80,52 @@ module.exports = function(RED) {
             // every so often (if no flows trigger one) to ensure the
             // refresh token does not expire
             node.error(RED._("box.error.no-refresh-token"));
-            return cb(RED._("box.error.no-refresh-token"));
+            return Promise.reject(RED._("box.error.no-refresh-token"));
         }
-        request.post({
-            url: 'https://api.box.com/oauth2/token',
-            json: true,
-            form: {
-                grant_type: 'refresh_token',
-                client_id: credentials.clientId,
-                client_secret: credentials.clientSecret,
-                refresh_token: credentials.refreshToken,
-            },
-        }, function(err, result, data) {
-            if (err) {
-                node.error(RED._("box.error.token-request-error",{err:err}));
-                return;
-            }
-            if (data.error) {
-                node.error(RED._("box.error.refresh-token-error",{message:data.error}));
-                return;
-            }
-            // console.log("refreshed: " + require('util').inspect(data));
-            credentials.accessToken = data.access_token;
-            if (data.refresh_token) {
-                credentials.refreshToken = data.refresh_token;
-            }
-            credentials.expiresIn = data.expires_in;
-            credentials.expireTime =
-                data.expires_in + (new Date().getTime()/1000);
-            credentials.tokenType = data.token_type;
-            RED.nodes.addCredentials(node.id, credentials);
-            if (typeof cb !== undefined) {
-                cb();
-            }
+
+        var sdk = new BoxSDK({
+            clientID: credentials.clientId,
+            clientSecret: credentials.clientSecret
         });
+
+        return sdk.getTokensRefreshGrant(credentials.refreshToken)
+            .then(function(tokenInfo) {
+                Object.assign(node.credentials, tokenInfo);
+                RED.nodes.addCredentials(node.id, node.credentials);
+        });
+                
+        // request.post({
+        //     url: 'https://api.box.com/oauth2/token',
+        //     json: true,
+        //     form: {
+        //         grant_type: 'refresh_token',
+        //         client_id: credentials.clientId,
+        //         client_secret: credentials.clientSecret,
+        //         refresh_token: credentials.refreshToken,
+        //     },
+        // }, function(err, result, data) {
+        //     if (err) {
+        //         node.error(RED._("box.error.token-request-error",{err:err}));
+        //         return;
+        //     }
+        //     if (data.error) {
+        //         node.error(RED._("box.error.refresh-token-error",{message:data.error}));
+        //         return;
+        //     }
+        //     // console.log("refreshed: " + require('util').inspect(data));
+        //     credentials.accessToken = data.access_token;
+        //     if (data.refresh_token) {
+        //         credentials.refreshToken = data.refresh_token;
+        //     }
+        //     credentials.expiresIn = data.expires_in;
+        //     credentials.expireTime =
+        //         data.expires_in + (new Date().getTime()/1000);
+        //     credentials.tokenType = data.token_type;
+        //     RED.nodes.addCredentials(node.id, credentials);
+        //     if (typeof cb !== undefined) {
+        //         cb();
+        //     }
+        // });
     };
 
     BoxNode.prototype.request = function(req, retries, cb) {
@@ -96,8 +143,13 @@ module.exports = function(RED) {
         }
         // always set access token to the latest ignoring any already present
         req.auth = { bearer: this.credentials.accessToken };
-        if (!this.credentials.expireTime ||
-            this.credentials.expireTime < (new Date().getTime()/1000)) {
+        if (!this.credentials.acquiredAtMS || (
+                Date.now() / 1000 >= (
+                    parseInt(this.credentials.acquiredAtMS, 10) + 
+                    parseInt(this.credentials.accessTokenTTLMS, 10)
+                )
+            )
+        ) {
             if (retries === 0) {
                 node.error(RED._("box.error.too-many-refresh-attempts"));
                 cb(RED._("box.error.too-many-refresh-attempts"));
@@ -230,7 +282,6 @@ module.exports = function(RED) {
         var callback = req.query.callback;
         var credentials = {
             clientId: req.query.clientId,
-            clientSecret: req.query.clientSecret
         };
 
         var csrfToken = crypto.randomBytes(18).toString('base64').replace(/\//g, '-').replace(/\+/g, '_');
@@ -267,57 +318,91 @@ module.exports = function(RED) {
             );
         }
 
-        request.post({
-            url: 'https://app.box.com/api/oauth2/token',
-            json: true,
-            form: {
-                grant_type: 'authorization_code',
-                code: req.query.code,
-                client_id: credentials.clientId,
-                client_secret: credentials.clientSecret,
-                redirect_uri: credentials.callback,
-            },
-        }, function(err, result, data) {
-            if (err) {
-                console.log("request error:" + err);
-                return res.send(RED._("box.error.something-broke"));
-            }
-            if (data.error) {
-                console.log("oauth error: " + data.error);
-                return res.send(RED._("box.error.something-broke"));
-            }
-            //console.log("data: " + require('util').inspect(data));
-            credentials.accessToken = data.access_token;
-            credentials.refreshToken = data.refresh_token;
-            credentials.expiresIn = data.expires_in;
-            credentials.expireTime = data.expires_in + (new Date().getTime()/1000);
-            credentials.tokenType = data.token_type;
-            delete credentials.csrfToken;
-            delete credentials.callback;
-            RED.nodes.addCredentials(node_id, credentials);
-            request.get({
-                url: 'https://api.box.com/2.0/users/me',
-                json: true,
-                auth: { bearer: credentials.accessToken },
-            }, function(err, result, data) {
-                if (err) {
-                    console.log('fetching box profile failed: ' + err);
-                    return res.send(RED._("box.error.profile-fetch-failed"));
-                }
-                if (result.statusCode >= 400) {
-                    console.log('fetching box profile failed: ' +
-                                result.statusCode + ": " + data.message);
-                    return res.send(RED._("box.error.profile-fetch-failed"));
-                }
-                if (!data.name) {
-                    console.log('fetching box profile failed: no name found');
-                    return res.send(RED._("box.error.profile-fetch-failed"));
-                }
-                credentials.displayName = data.name;
-                RED.nodes.addCredentials(node_id, credentials);
-                res.send(RED._("box.error.authorized"));
-            });
+        var sdk = new BoxSDK({
+            clientID: credentials.clientId,
+            clientSecret: credentials.clientSecret
         });
+
+        return sdk.getTokensAuthorizationCodeGrant(req.query.code)
+            .then(function(tokenInfo) {
+                var tokenStore = new TokenStore(node_id);
+                return new Promise(function(resolve, reject) {
+                    tokenStore.write(tokenInfo, function(err) {
+            if (err) {
+                            return reject(err);
+            }
+                        resolve({
+                            tokenStore: tokenStore, 
+                            tokenInfo: tokenInfo
+                        });
+                    });
+                });
+            })
+            .then(function (data) {
+                var tokenInfo = data.tokenInfo;
+                var tokenStore = data.tokenStore;
+                var client = sdk.getPersistentClient(tokenInfo, tokenStore);
+                return client.users.get(client.CURRENT_USER_ID);
+            })
+            .then(function(user) {
+                credentials.displayName = user.name;
+            RED.nodes.addCredentials(node_id, credentials);
+                res.send(RED._("box.error.authorized"));
+            })
+            .catch(function(err) {
+                res.status(401).send(err.toString())
+            });
+        // request.post({
+        //     url: 'https://app.box.com/api/oauth2/token',
+        //     json: true,
+        //     form: {
+        //         grant_type: 'authorization_code',
+        //         code: req.query.code,
+        //         client_id: credentials.clientId,
+        //         client_secret: credentials.clientSecret,
+        //         redirect_uri: credentials.callback,
+        //     },
+        // }, function(err, result, data) {
+        //     if (err) {
+        //         console.log("request error:" + err);
+        //         return res.send(RED._("box.error.something-broke"));
+        //     }
+        //     if (data.error) {
+        //         console.log("oauth error: " + data.error);
+        //         return res.send(RED._("box.error.something-broke"));
+        //     }
+        //     //console.log("data: " + require('util').inspect(data));
+        //     credentials.accessToken = data.access_token;
+        //     credentials.refreshToken = data.refresh_token;
+        //     credentials.expiresIn = data.expires_in;
+        //     credentials.expireTime = data.expires_in + (new Date().getTime()/1000);
+        //     credentials.tokenType = data.token_type;
+        //     delete credentials.csrfToken;
+        //     delete credentials.callback;
+        //     RED.nodes.addCredentials(node_id, credentials);
+        //     request.get({
+        //         url: 'https://api.box.com/2.0/users/me',
+        //         json: true,
+        //         auth: { bearer: credentials.accessToken },
+        //     }, function(err, result, data) {
+        //         if (err) {
+        //             console.log('fetching box profile failed: ' + err);
+        //             return res.send(RED._("box.error.profile-fetch-failed"));
+        //         }
+        //         if (result.statusCode >= 400) {
+        //             console.log('fetching box profile failed: ' +
+        //                         result.statusCode + ": " + data.message);
+        //             return res.send(RED._("box.error.profile-fetch-failed"));
+        //         }
+        //         if (!data.name) {
+        //             console.log('fetching box profile failed: no name found');
+        //             return res.send(RED._("box.error.profile-fetch-failed"));
+        //         }
+        //         credentials.displayName = data.name;
+        //         RED.nodes.addCredentials(node_id, credentials);
+        //         res.send(RED._("box.error.authorized"));
+        //     });
+        // });
     });
 
     function BoxInNode(n) {

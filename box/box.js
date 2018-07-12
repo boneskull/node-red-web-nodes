@@ -19,45 +19,325 @@ module.exports = function(RED) {
     "use strict";
     var crypto = require("crypto");
     var fs = require("fs");
-    var request = require("request");
     var url = require("url");
     var minimatch = require("minimatch");
-    var BoxSDK = require('box-node-sdk');
+    const BoxSDK = require('box-node-sdk');
+    
+    const AUTH_MODE_OAUTH2 = 'OAUTH2';
+    const AUTH_MODE_APP = 'APP';
+    const AUTH_MODE_DEV = 'DEV';
 
-    var AUTH_MODE_OAUTH2 = 'oauth2';
-    var AUTH_MODE_APP = 'app';
-
-    function TokenStore (id) {
-        this.id = id;
+    function normalizeFilepath (filepath) {
+        return (typeof filepath === "string" ? filepath.split("/").filter(Boolean) : filepath.filter(Boolean));
     }
 
-    TokenStore.prototype = {
-        read: function(cb) {
-            var id = this.id;
-            process.nextTick(function () {
+    function streamToPromise (stream) {
+        let content = '';
+        return new Promise((resolve, reject) => {
+            stream.on('data', chunk => {
+                content += chunk;
+            })
+                .on('end', () => {
+                    resolve(content);
+                })
+                .on('error', err => {
+                    reject(err);
+                });
+        });
+    }
+
+    /**
+     * Provides an adapter for a Box SDK persistent client to store its tokens
+     * in Node-RED.
+     * For our purposes, this is the entirety of the Node's `credentials` object.
+     * This class is *not* used directly by the Nodes.
+     */
+    class TokenStore {
+        /**
+         * Assigns this TokenStore a Node ID
+         * @param {string} id Node ID to associate TokenStore with
+         */
+        constructor(id) {
+            this.id = id;
+        }
+    
+        /**
+         * Reads the token store
+         * @param {Function} cb Nodeback
+         */
+        read(cb) {
+            const id = this.id;
+            // this is only here to force the callback to be called async
+            process.nextTick(() => {
                 cb(null, RED.nodes.getCredentials(id));
             });
-        },
-        write: function(tokenInfo, cb) {
-            var id = this.id;
-            var credentials = RED.nodes.getCredentials(id);
+        }
+    
+        /**
+         * Writes "Token Info" to the token store
+         * @param {Object} tokenInfo "Token Info" object
+         * @param {Function} cb Nodeback
+         */
+        write(tokenInfo, cb) {
+            const id = this.id;
+            const credentials = RED.nodes.getCredentials(id);
             Object.assign(credentials, tokenInfo);
             RED.nodes.addCredentials(id, credentials)
-                .then(function () {
-                    cb();
-                }, cb);
-        },
-        clear: function(cb) {
+                .then(() => cb(), cb);
+        }
+    
+        /**
+         * Annihilates the contents of the token store
+         * @param {Function} cb Nodeback
+         */
+        clear(cb) {
             this.write(null, cb);
         }
     }
+  
+    class BoxCredentialsNode {
+        constructor(n) {
+            RED.nodes.createNode(this,n);
 
-    function BoxNode(n) {
-        RED.nodes.createNode(this,n);
+            this.authMode = n.authMode || AUTH_MODE_OAUTH2;
 
-        this.authMode = n.authMode || AUTH_MODE_OAUTH2;
+            // if we have an active event stream, remove the "error" listener, which
+            // would have been set in BoxCredentialsNode#getEventStream.
+            this.on('close', () => {
+                if (this._eventStream) {
+                    // ideally, nothing else should be listening for errors here.
+                    this._eventStream.removeAllListeners('error');
+                }
+            });
+        }
+
+        /**
+         * `true` if the credentials are in place per the auth mode.
+         * @type Boolean
+         */
+        get hasCredentials () {
+            switch (this.authMode) {
+                case AUTH_MODE_OAUTH2:
+                    return Boolean(this.credentials.accessToken);
+                case AUTH_MODE_APP: 
+                    return Boolean(this.credentials.privateKey);
+                case AUTH_MODE_DEV:
+                    return Boolean(this.credentials.devToken);
+                default:
+                    return false;
+            }
+        }
+
+        /**
+         * The TokenStore associated with this Node
+         * @type TokenStore
+         */
+        get tokenStore () {
+            const tokenStore = this._tokenStore;
+            if (tokenStore) {
+                return tokenStore;
+            }
+            this._tokenStore = new TokenStore(this.id);
+            return this.tokenStore;
+        }
+
+        /**
+         * A Box SDK client, created as per the auth mode.
+         * @type BoxClient
+         */
+        get client () {
+            if (this._client) {
+                return this._client;
+            }
+            const sdk = this.sdk;
+            if (this.authMode === AUTH_MODE_OAUTH2) {
+                return sdk.getPersistentClient({
+                    accessToken: this.credentials.accessToken,
+                    refreshToken: this.credentials.refreshToken,
+                    acquiredAtMS: this.credentials.acquiredAtMS,
+                    accessTokenTTLMS: this.credentials.accessTokenTTLMS
+                }, this.tokenStore);
+            }
+            if (this.credentials.appEnterpriseId) {
+                return sdk.getAppAuthClient(
+                    'enterprise', this.credentials.appEnterpriseId
+                );
+            }
+            return sdk.getAppAuthClient('user', this.credentials.appUserId);
+        }
+
+        /**
+         * A Box SDK instance, created as per the auth mode.
+         * @type BoxSDKNode
+         */
+        get sdk () {
+            if (this._sdk) {
+                return this._sdk;
+            }
+            this._sdk = new BoxSDK(
+                this.authMode === AUTH_MODE_APP ? {
+                    clientID: this.credentials.clientId,
+                    clientSecret: this.credentials.clientSecret,
+                    appAuth: {
+                        keyID: this.credentials.publicKeyId,
+                        privateKey: this.credentials.privateKey,
+                        passphrase: this.credentials.passphrase
+                    }
+                } : {
+                    clientID: this.credentials.clientId,
+                    clientSecret: this.credentials.clientSecret
+                }
+            );
+            return this._sdk;
+        }
+
+        /**
+         * Gets folder info from Box
+         * @param {string} id Folder ID
+         * @returns {Promise<Object>} Folder info
+         */
+        folderInfo (id) {
+            return this.client.folders.get(id);
+        }
+
+        folderItems (id) {
+            return this.client.folders.getItems(id);
+        }
+
+        /**
+         * Gets an event stream from Box, as per the auth mode
+         * @param {Object} [options={}] Options
+         * @param {number} [options.interval=0] Polling or fetch interval, in seconds
+         * @private
+         * @returns {Promise<EventStream|EnterpriseEventStream>} A Readable stream
+         */
+        getEventStream (options) {
+            options = options || {};
+            return Promise.resolve()
+                .then(() => {
+                    if (this._eventStream) {
+                        return this._eventStream;
+                    }
+                    if (this.authMode === AUTH_MODE_APP) {
+                        return this.client.events.getEnterpriseEventStream({
+                            // this is seconds
+                            pollingInterval: options.interval
+                        });
+                    }
+                    return this.client.events.getEventStream({
+                        // this is milliseconds.  handy!
+                        fetchInterval: (options.interval || 0) * 1000
+                    });
+                })
+                .then(stream => {
+                    stream.on('error', err => {
+                        this.error(RED._('box.error.event-fetch-failed', {
+                            err: err.toString()
+                        }));
+                    });
+                    this._eventStream = stream;
+                    return stream;
+                });
+        }
+
+        /**
+         * Returns the ID of a filepath's containing folder in Box
+         * @param {string} filepath A filepath
+         * @param {string} [folderId=0] Parent folder ID; defaults to root
+         * @returns {Promise<string>} A folder ID
+         */
+        resolvePath (filepath, folderId) {
+            return Promise.resolve()
+                .then(() => {
+                    folderId = folderId || '0';
+                    filepath = normalizeFilepath(filepath);
+                    if (!filepath.length) {
+                        return folderId;
+                    }
+                    const folder = filepath.shift();
+                    return this.folderItems(folderId)
+                        .then(data => {
+                            const entries = data.entries;
+                            for (let i = 0; i < entries.length; i++) {
+                                if (entries[i].type === 'folder' &&
+                                    entries[i].name === folder) {
+                                    // found
+                                    return this.resolvePath(filepath, entries[i].id);
+                                }
+                            }
+                            return Promise.reject(RED._("box.error.not-found"));
+                        });
+                    });
+        }
+
+        /**
+         * Attaches a listener function to an event stream
+         * @param {Function} listener Listener function; receives event object
+         * @param {Object} [options={}] Options
+         * @param {number} [options.interval=0] Polling or fetch interval, in seconds
+         * @returns {Promise<Function>} An "unsubscribe" function
+         */
+        subscribe (listener, options) {
+            return this.getEventStream(options)
+                .then(stream => {
+                    stream.on('data', listener);
+                    return () => {
+                        stream.removeListener('data', listener);
+                    };
+                });
+        }
+
+        /**
+         * Finds a file's ID by filename
+         * @param {string} filename A filename
+         * @returns {Promise<string>} File ID, if found
+         */
+        resolveFile (filename) {
+            return Promise.resolve()
+                .then(() => {
+                    filename = normalizeFilepath(filename);
+                    if (!filename.length) {
+                        return Promise.reject(RED._("box.error.missing-filename"));
+                    }
+                    const file = filename.pop();
+                    return this.resolvePath(filename)
+                        .then(id => this.folderItems(id))
+                        .then(data => {
+                            const entries = data.entries;
+                            for (var i = 0; i < entries.length; i++) {
+                                if (entries[i].type === 'file' &&
+                                    entries[i].name === file) {
+                                    // found
+                                    return entries[i].id;
+                                }
+                            }
+                            return Promise.reject(RED._("box.error.not-found"));
+                        });
+                });
+        }
+
+        /**
+         * Downloads a file, optionally coerced to a representation type.
+         * @param {string} filepath A filepath
+         * @param {FileRepresentationType} [representation] File representation type
+         * @returns {Promise<Buffer|string>} A Buffer or string of the file contents (or representation thereof)
+         */
+        download (filepath, representation) {
+            return Promise.resolve()
+                .then(() => {
+                    if (representation && this.client.files.representation[representation]) {
+                        return this.client.files.getRepresentationContent(
+                            filepath, this.client.files.representation[representation]
+                        );
+                    }
+                    // "raw"
+                    return this.client.files.getReadStream(filepath);
+                })
+                .then(streamToPromise);
+        }
     }
-    RED.nodes.registerType("box-credentials", BoxNode, {
+
+    RED.nodes.registerType("box-credentials", BoxCredentialsNode, {
         credentials: {
             displayName: {type:"text"},
             clientId: {type:"text"},
@@ -66,208 +346,21 @@ module.exports = function(RED) {
             refreshToken: {type:"password"},
             accessTokenTTLMS: {type:"text"},
             acquiredAtMS: {type: 'text'},
-            publicKeyID: {type: 'text'},
-            privateKey: {type: 'password'}
+            publicKeyId: {type: 'text'},
+            privateKey: {type: 'password'},
+            passphrase: {type: 'password'},
+            appEnterpriseId: {type: 'text'},
+            appUserId: {type: 'text'}
         }
     });
 
-    BoxNode.prototype.refreshToken = function() {
-        var credentials = this.credentials;
-        var node = this;
-        //console.log("refreshing token: " + credentials.refreshToken);
-        if (!credentials.refreshToken) {
-            // TODO: add a timeout to make sure we make a request
-            // every so often (if no flows trigger one) to ensure the
-            // refresh token does not expire
-            node.error(RED._("box.error.no-refresh-token"));
-            return Promise.reject(RED._("box.error.no-refresh-token"));
-        }
-
-        var sdk = new BoxSDK({
-            clientID: credentials.clientId,
-            clientSecret: credentials.clientSecret
-        });
-
-        return sdk.getTokensRefreshGrant(credentials.refreshToken)
-            .then(function(tokenInfo) {
-                Object.assign(node.credentials, tokenInfo);
-                RED.nodes.addCredentials(node.id, node.credentials);
-        });
-                
-        // request.post({
-        //     url: 'https://api.box.com/oauth2/token',
-        //     json: true,
-        //     form: {
-        //         grant_type: 'refresh_token',
-        //         client_id: credentials.clientId,
-        //         client_secret: credentials.clientSecret,
-        //         refresh_token: credentials.refreshToken,
-        //     },
-        // }, function(err, result, data) {
-        //     if (err) {
-        //         node.error(RED._("box.error.token-request-error",{err:err}));
-        //         return;
-        //     }
-        //     if (data.error) {
-        //         node.error(RED._("box.error.refresh-token-error",{message:data.error}));
-        //         return;
-        //     }
-        //     // console.log("refreshed: " + require('util').inspect(data));
-        //     credentials.accessToken = data.access_token;
-        //     if (data.refresh_token) {
-        //         credentials.refreshToken = data.refresh_token;
-        //     }
-        //     credentials.expiresIn = data.expires_in;
-        //     credentials.expireTime =
-        //         data.expires_in + (new Date().getTime()/1000);
-        //     credentials.tokenType = data.token_type;
-        //     RED.nodes.addCredentials(node.id, credentials);
-        //     if (typeof cb !== undefined) {
-        //         cb();
-        //     }
-        // });
-    };
-
-    BoxNode.prototype.request = function(req, retries, cb) {
-        var node = this;
-        if (typeof retries === 'function') {
-            cb = retries;
-            retries = 1;
-        }
-        if (typeof req !== 'object') {
-            req = { url: req };
-        }
-        req.method = req.method || 'GET';
-        if (!req.hasOwnProperty("json")) {
-            req.json = true;
-        }
-        // always set access token to the latest ignoring any already present
-        req.auth = { bearer: this.credentials.accessToken };
-        if (!this.credentials.acquiredAtMS || (
-                Date.now() / 1000 >= (
-                    parseInt(this.credentials.acquiredAtMS, 10) + 
-                    parseInt(this.credentials.accessTokenTTLMS, 10)
-                )
-            )
-        ) {
-            if (retries === 0) {
-                node.error(RED._("box.error.too-many-refresh-attempts"));
-                cb(RED._("box.error.too-many-refresh-attempts"));
-                return;
-            }
-            node.warn(RED._("box.warn.refresh-token"));
-            node.refreshToken(function (err) {
-                if (err) {
-                    return;
-                }
-                node.request(req, 0, cb);
-            });
-            return;
-        }
-        return request(req, function(err, result, data) {
-            if (err) {
-                // handled in callback
-                return cb(err, data);
-            }
-            if (result.statusCode === 401 && retries > 0) {
-                retries--;
-                node.warn(RED._("box.warn.refresh-401"));
-                node.refreshToken(function (err) {
-                    if (err) {
-                        return cb(err, null);
-                    }
-                    return node.request(req, retries, cb);
-                });
-            }
-            if (result.statusCode >= 400) {
-                return cb(result.statusCode + ": " + data.message, data);
-            }
-            return cb(err, data);
-        });
-    };
-
-    BoxNode.prototype.folderInfo = function(parent_id, cb) {
-        this.request('https://api.box.com/2.0/folders/'+parent_id, cb);
-    };
-
-    BoxNode.prototype.resolvePath = function(path, parent_id, cb) {
-        var node = this;
-        if (typeof parent_id === 'function') {
-            cb = parent_id;
-            parent_id = 0;
-        }
-        if (typeof path === "string") {
-            // split path and remove empty string components
-            path = path.split("/").filter(function(e) { return e !== ""; });
-            // TODO: could also handle '/blah/../' and '/./' perhaps
-        } else {
-            path = path.filter(function(e) { return e !== ""; });
-        }
-        if (path.length === 0) {
-            return cb(null, parent_id);
-        }
-        var folder = path.shift();
-        node.folderInfo(parent_id, function(err, data) {
-            if (err) {
-                return cb(err, -1);
-            }
-            var entries = data.item_collection.entries;
-            for (var i = 0; i < entries.length; i++) {
-                if (entries[i].type === 'folder' &&
-                    entries[i].name === folder) {
-                    // found
-                    return node.resolvePath(path, entries[i].id, cb);
-                }
-            }
-            return cb(RED._("box.error.not-found"), -1);
-        });
-    };
-
-    BoxNode.prototype.resolveFile = function(path, parent_id, cb) {
-        var node = this;
-        if (typeof parent_id === 'function') {
-            cb = parent_id;
-            parent_id = 0;
-        }
-        if (typeof path === "string") {
-            // split path and remove empty string components
-            path = path.split("/").filter(function(e) { return e !== ""; });
-            // TODO: could also handle '/blah/../' and '/./' perhaps
-        } else {
-            path = path.filter(function(e) { return e !== ""; });
-        }
-        if (path.length === 0) {
-            return cb(RED._("box.error.missing-filename"), -1);
-        }
-        var file = path.pop();
-        node.resolvePath(path, function(err, parent_id) {
-            if (err) {
-                return cb(err, parent_id);
-            }
-            node.folderInfo(parent_id, function(err, data) {
-                if (err) {
-                    return cb(err, -1);
-                }
-                var entries = data.item_collection.entries;
-                for (var i = 0; i < entries.length; i++) {
-                    if (entries[i].type === 'file' &&
-                        entries[i].name === file) {
-                        // found
-                        return cb(null, entries[i].id);
-                    }
-                }
-                return cb(RED._("box.error.not-found"), -1);
-            });
-        });
-    };
-
     function constructFullPath(entry) {
         if (entry.path_collection) {
-            var parentPath = entry.path_collection.entries
-                .filter(function (e) { return e.id !== "0"; })
-                .map(function (e) { return e.name; })
+            const parentPath = entry.path_collection.entries
+                .filter(e => e.id !== "0")
+                .map(e => e.name)
                 .join('/');
-            return (parentPath !== "" ? parentPath+'/' : "") + entry.name;
+            return (parentPath ? `${parentPath}/` : "") + entry.name;
         }
         return entry.name;
     }
@@ -282,9 +375,13 @@ module.exports = function(RED) {
         var callback = req.query.callback;
         var credentials = {
             clientId: req.query.clientId,
+            clientSecret: req.query.clientSecret
         };
 
-        var csrfToken = crypto.randomBytes(18).toString('base64').replace(/\//g, '-').replace(/\+/g, '_');
+        var csrfToken = crypto.randomBytes(18)
+            .toString('base64')
+            .replace(/\//g, '-')
+            .replace(/\+/g, '_');
         credentials.csrfToken = csrfToken;
         credentials.callback = callback;
         res.cookie('csrf', csrfToken);
@@ -323,14 +420,14 @@ module.exports = function(RED) {
             clientSecret: credentials.clientSecret
         });
 
-        return sdk.getTokensAuthorizationCodeGrant(req.query.code)
-            .then(function(tokenInfo) {
-                var tokenStore = new TokenStore(node_id);
-                return new Promise(function(resolve, reject) {
-                    tokenStore.write(tokenInfo, function(err) {
-            if (err) {
+        sdk.getTokensAuthorizationCodeGrant(req.query.code)
+            .then(tokenInfo => {
+                const tokenStore = new TokenStore(node_id);
+                return new Promise((resolve, reject) => {
+                    tokenStore.write(tokenInfo, err => {
+                        if (err) {
                             return reject(err);
-            }
+                        }
                         resolve({
                             tokenStore: tokenStore, 
                             tokenInfo: tokenInfo
@@ -338,347 +435,162 @@ module.exports = function(RED) {
                     });
                 });
             })
-            .then(function (data) {
-                var tokenInfo = data.tokenInfo;
-                var tokenStore = data.tokenStore;
-                var client = sdk.getPersistentClient(tokenInfo, tokenStore);
+            .then(data => {
+                const tokenInfo = data.tokenInfo;
+                const tokenStore = data.tokenStore;
+                const client = sdk.getPersistentClient(tokenInfo, tokenStore);
                 return client.users.get(client.CURRENT_USER_ID);
             })
-            .then(function(user) {
+            .then(user => {
                 credentials.displayName = user.name;
-            RED.nodes.addCredentials(node_id, credentials);
+                RED.nodes.addCredentials(node_id, credentials);
                 res.send(RED._("box.error.authorized"));
             })
-            .catch(function(err) {
-                res.status(401).send(err.toString())
+            .catch(err => {
+                res.status(500).send(err.toString());
             });
-        // request.post({
-        //     url: 'https://app.box.com/api/oauth2/token',
-        //     json: true,
-        //     form: {
-        //         grant_type: 'authorization_code',
-        //         code: req.query.code,
-        //         client_id: credentials.clientId,
-        //         client_secret: credentials.clientSecret,
-        //         redirect_uri: credentials.callback,
-        //     },
-        // }, function(err, result, data) {
-        //     if (err) {
-        //         console.log("request error:" + err);
-        //         return res.send(RED._("box.error.something-broke"));
-        //     }
-        //     if (data.error) {
-        //         console.log("oauth error: " + data.error);
-        //         return res.send(RED._("box.error.something-broke"));
-        //     }
-        //     //console.log("data: " + require('util').inspect(data));
-        //     credentials.accessToken = data.access_token;
-        //     credentials.refreshToken = data.refresh_token;
-        //     credentials.expiresIn = data.expires_in;
-        //     credentials.expireTime = data.expires_in + (new Date().getTime()/1000);
-        //     credentials.tokenType = data.token_type;
-        //     delete credentials.csrfToken;
-        //     delete credentials.callback;
-        //     RED.nodes.addCredentials(node_id, credentials);
-        //     request.get({
-        //         url: 'https://api.box.com/2.0/users/me',
-        //         json: true,
-        //         auth: { bearer: credentials.accessToken },
-        //     }, function(err, result, data) {
-        //         if (err) {
-        //             console.log('fetching box profile failed: ' + err);
-        //             return res.send(RED._("box.error.profile-fetch-failed"));
-        //         }
-        //         if (result.statusCode >= 400) {
-        //             console.log('fetching box profile failed: ' +
-        //                         result.statusCode + ": " + data.message);
-        //             return res.send(RED._("box.error.profile-fetch-failed"));
-        //         }
-        //         if (!data.name) {
-        //             console.log('fetching box profile failed: no name found');
-        //             return res.send(RED._("box.error.profile-fetch-failed"));
-        //         }
-        //         credentials.displayName = data.name;
-        //         RED.nodes.addCredentials(node_id, credentials);
-        //         res.send(RED._("box.error.authorized"));
-        //     });
-        // });
     });
 
-    function BoxInNode(n) {
-        RED.nodes.createNode(this,n);
-        this.filepattern = n.filepattern || "";
-        this.interval = n.interval || 60;
-        this.longpolling = Boolean(n.longpolling);
-        this.box = RED.nodes.getNode(n.box);
-        this.seenEvents = {};
-        var node = this;
-        if (!this.box || !this.box.credentials.accessToken) {
-            this.warn(RED._("box.warn.missing-credentials"));
-            return;
-        }
-        node.status({fill:"blue",shape:"dot",text:"box.status.initializing"});
-        
-        // this will fire once the initial stream position is determined
-        node.on('ready', function () {
-            if (node.longpolling) {
-                node.startLongPolling();
-            } else {
-                node.startIntervalPolling();
-            }
-        });
+    class BoxEventNode {
+        constructor(n) {
+            RED.nodes.createNode(this,n);
+            this.filepattern = n.filepattern || "";
+            this.interval = n.interval || "";
+            /**
+             * @type BoxCredentialsNode
+             **/
+            this.box = RED.nodes.getNode(n.box);
 
-        // this fires if either the long-poller says we should have data, or on an interval.
-        node.on('check-events', function() {
-            node.status({fill:"blue",shape:"dot",text:"box.status.checking-for-events"});
-            node.box.request({
-                url: 'https://api.box.com/2.0/events?stream_position='+node.state+'&stream_type=changes',
-            }, function(err, data) {
-                if (err) {
-                    node.error(RED._("box.error.events-fetch-failed",{err:err.toString()}),{});
-                    node.status({});
-                    return;
-                }
-                node.status({});
-                node.state = data.next_stream_position;
-                node.emit('ready');
-                for (var i = 0; i < data.entries.length; i++) {
-                    // TODO: support other event types
-                    // TODO: suppress duplicate events
-                    // for both of the above see:
-                    //    https://developers.box.com/docs/#events
-                    var event;
-                    if (node.seenEvents[data.entries[i].event_id]) {
-                        continue;
-                    }
-                    node.seenEvents[data.entries[i].event_id] = true;
-                    if (data.entries[i].event_type === 'ITEM_CREATE') {
-                        event = 'add';
-                    } else if (data.entries[i].event_type === 'ITEM_UPLOAD') {
-                        event = 'add';
-                    } else if (data.entries[i].event_type === 'ITEM_RENAME') {
-                        event = 'add';
-                        // TODO: emit delete event?
-                    } else if (data.entries[i].event_type === 'ITEM_TRASH') {
-                        // need to find old path
-                        node.lookupOldPath({}, data.entries[i], 'delete');
-                        /* strictly speaking the {} argument above should
-                        * be clone(msg) but:
-                        *   - it must be {}
-                        *   - if there was any possibility of a different
-                        *     msg then it should be cloned using the
-                        *     node-red/red/nodes/Node.js cloning function
-                        */
-                        continue;
-                    } else {
-                        event = 'unknown';
-                    }
-                    //console.log(JSON.stringify(data.entries[i], null, 2));
-                    node.sendEvent({}, data.entries[i], event);
-                }
+            if (!this.box || !this.box.hasCredentials) {
+                this.warn(RED._("box.warn.missing-credentials"));
+                return;
+            }
+
+            this.status({
+                fill: "blue",
+                shape: "dot",
+                text: "box.status.initializing"
             });
-        });
-
-        node.getInitialStreamPosition();
-    }
-    
-    RED.nodes.registerType("box in", BoxInNode);
-
-    BoxInNode.prototype.sendEvent = function(msg, entry, event, path) {
-        var source = entry.source;
-        if (typeof path === "undefined") {
-            path = constructFullPath(source);
-        }
-        if (this.filepattern && !minimatch(path, this.filepattern)) {
-            return;
-        }
-        msg.file = source.name;
-        msg.payload = path;
-        msg.event = event;
-        msg.data = entry;
-        this.send(msg);
-    };
-
-    BoxInNode.prototype.lookupOldPath = function (msg, entry, event) {
-        var source = entry.source;
-        this.status({fill:"blue",shape:"dot",text:"box.status.resolving-path"});
-        var node = this;
-        node.box.folderInfo(source.parent.id, function(err, folder) {
-            if (err) {
-                node.warn(RED._("box.warn.old-path-failed",{err:err.toString()}));
-                node.status({fill:"red",shape:"ring",text:"box.status.failed"});
-                return;
-            }
-            node.status({});
-            // TODO: add folder path_collection to entry.parent?
-            var parentPath = constructFullPath(folder);
-            node.sendEvent(msg, entry, event,
-                (parentPath !== "" ? parentPath + '/' : '') + source.name);
-        });
-    };
-
-    /**
-     * Init long-polling to retrieve events from Box in real-time
-     * 
-     * If long polling is enabled, we make an OPTIONS request to the "events"
-     * endpoint.  this endpoint will return another URL to poll, in addition
-     * to a "timeout" value.  we will then make a GET request to the supplied URL
-     * and wait for a response.  if the response is "new_change", we hit the
-     * "events" endpoint with the usual GET request (and stream position).  if the
-     * response is "retry_timeout", we retry the operation again from the OPTIONS
-     * request. if the "timeout" value is exceeded, we retry the GET request.
-     * if "max_retries" is exceeded, we start again from OPTIONS.
-     * @see https://developer.box.com/v2.0/reference#long-polling
-     * @private
-     */
-    BoxInNode.prototype.startLongPolling = function() {
-        var node = this;
-        node.box.request({
-            url: 'https://api.box.com/2.0/events',
-            method: 'OPTIONS' 
-        }, function (err, data) {
-            if (err) {
-                node.error(RED._('box.error.long-polling-failed'), {err: err.toString()});
-                return;
-            }
-            if (!(data.entries && data.entries.length)) {
-                node.fail(new Error('Invalid response from Box'));
-                return;
-            }
-            node.longpoll(data.entries.shift());
-        });
-    }
-
-    /**
-     * Initializes default (interval-based) polling
-     */
-    BoxInNode.prototype.startIntervalPolling = function () {
-        var node = this;
-
-        if (!node.pollingInterval) {            
-            node.pollingInterval = setInterval(function() {
-                node.emit('check-events');
-            }, node.interval * 1000); // interval in ms
-    
-            node.on("close", function() {
-                clearInterval(node.pollingInterval);
-            });
-        }
-    };
-
-    /**
-     * Gets initial stream position from events endpoint
-     * Saves as "state" property.  When ready, emits "ready" event, which will
-     * initialize long-polling or interval-based polling, depending on Node config.
-     */
-    BoxInNode.prototype.getInitialStreamPosition = function () {
-        var node = this;
-        node.box.request({
-            url: 'https://api.box.com/2.0/events?stream_position=now&stream_type=changes',
-        }, function (err, data) {
-            if (err) {
-                node.error(RED._('box.error.event-stream-initialize-failed', {err: err.toString()}));
-                node.status({
-                    fill: 'red',
-                    shape: 'ring',
-                    text: 'box.status.failed'
-                });
-                return;
-            }
-            node.state = data.next_stream_position;
-            node.status({});
-            node.emit('ready');
-        });
-    };
-
-    /**
-     * Long-poll Box for new events
-     * This function calls itself recursively until config.max_retries is hit.  At that point
-     * it will call BoxInNode#startPolling again.
-     * @private
-     * @param {Object} config Object returned by Box's "events" endpoint when hit with OPTIONS method
-     * @param {number} config.max_retries Number of retries allowed
-     * @param {number} config.retry_timeout Retry the GET request after this many seconds
-     * @param {string} config.url Endpoint of GET request
-     * @param {number} [count=0] Current retry count
-     */
-    BoxInNode.prototype.longpoll = function (config, count) {
-        var node = this;
-        count = count || 0;
-        node.box.request({
-            url: config.url,
-            timeout: parseInt(config.retry_timeout, 10) * 1000
-        }, function (err, data) {
-            if (err) {
-                if (err.code === 'ESOCKETTIMEDOUT') {
-                    if (count === parseInt(config.max_retries, 10) - 1) {
-                        node.startLongPolling();
+            
+            this.box.subscribe(event => {
+                // if there's a "source" property, we can filter
+                if (event.source) {
+                    event.fullPath = constructFullPath(event.source);
+                    if (this.filepattern && !minimatch(event.fullPath, this.filepattern)) {
+                        this.debug(RED._('box.debug.filtered'), {
+                            fullPath: event.fullPath,
+                            filepattern: this.filepattern
+                        });
                         return;
                     }
-                    process.nextTick(function() {
-                        node.longpoll(config, ++count);
-                    });
-                    return;
                 }
-                node.error(RED._('box.error.long-polling-failed'), {err: err.toString()});
-                return;
-            }
-            if (data.message === 'new_change') {
-                node.emit('check-events');
-            } else if (data.message === 'reconnect') {
-                node.startLongPolling();
-            } else {
-                // ???
-            }
-        });
-    };
-
-    function BoxQueryNode(n) {
-        RED.nodes.createNode(this,n);
-        this.filename = n.filename || "";
-        this.box = RED.nodes.getNode(n.box);
-        var node = this;
-        if (!this.box || !this.box.credentials.accessToken) {
-            this.warn(RED._("box.warn.missing-credentials"));
-            return;
+                this.send({payload: event});
+            }, {interval: this.interval})
+                .then(unsubscribe => {
+                    this.status({
+                        fill: 'green',
+                        shape: 'circle',
+                        text: 'box.status.listening'
+                    });
+                    this.on('close', unsubscribe);
+                })
+                .catch(err => {
+                    this.error(RED._('box.error.event-stream-initialize-failed', {
+                        err: err.toString()
+                    }));
+                });
         }
 
-        node.on("input", function(msg) {
-            var filename = node.filename || msg.filename;
-            if (filename === "") {
-                node.error(RED._("box.error.no-filename-specified"));
+        lookupOldPath (msg, entry, event) {
+            return Promise.resolve()
+                .then(() => {
+                    const source = entry.source;
+                    this.status({
+                        fill: "blue",
+                        shape: "dot",
+                        text: "box.status.resolving-path"
+                    });
+                    return this.box.folderInfo(source.parent.id);
+                })
+                .then(folder => {
+                    this.status({});
+                    const parentPath = constructFullPath(folder);
+                    this.sendEvent(msg, entry, event, (parentPath ? `${parentPath}/` : '') + source.name);
+                })
+                .catch(err => {
+                    this.warn(RED._(
+                        "box.warn.old-path-failed", {
+                            err: err.toString()
+                        }
+                    ));
+                    this.status({
+                        fill: "red",
+                        shape: "ring",
+                        text: "box.status.failed"
+                    });
+                })
+                // TODO: add folder path_collection to entry.parent?
+        }
+    }    
+    RED.nodes.registerType("box in", BoxEventNode);
+
+    const DOWNLOAD_AS_RAW = 'RAW';
+
+    class BoxDownloadNode {
+        constructor (n) {
+            RED.nodes.createNode(this,n);
+            this.filename = n.filename || "";
+            this.downloadAs = n.downloadAs || DOWNLOAD_AS_RAW;
+            /**
+             * @type BoxCredentialsNode
+             */
+            this.box = RED.nodes.getNode(n.box);
+            if (!this.box || !this.box.hasCredentials) {
+                this.warn(RED._("box.warn.missing-credentials"));
                 return;
             }
-            msg.filename = filename;
-            node.status({fill:"blue",shape:"dot",text:"box.status.resolving-path"});
-            node.box.resolveFile(filename, function(err, file_id) {
-                if (err) {
-                    node.error(RED._("box.error.path-resolve-failed",{err:err.toString()}),msg);
-                    node.status({fill:"red",shape:"ring",text:"box.status.failed"});
+
+            this.on("input", msg => {
+                const filename = this.filename || msg.filename;
+                const downloadAs = this.downloadAs || msg.downloadAs;
+                if (!filename) {
+                    this.error(RED._("box.error.no-filename-specified"));
                     return;
                 }
-                node.status({fill:"blue",shape:"dot",text:"box.status.downloading"});
-                node.box.request({
-                    url: 'https://api.box.com/2.0/files/'+file_id+'/content',
-                    json: false,
-                    followRedirect: true,
-                    maxRedirects: 1,
-                    encoding: null,
-                }, function(err, data) {
-                    if (err) {
-                        node.error(RED._("box.error.download-failed",{err:err.toString()}),msg);
-                        node.status({fill:"red",shape:"ring",text:"box.status.failed"});
-                    } else {
-                        msg.payload = data;
-                        delete msg.error;
-                        node.status({});
-                        node.send(msg);
-                    }
+                msg.filename = filename;
+                msg.downloadAs = downloadAs;
+                this.status({
+                    fill: "blue",
+                    shape: "dot",
+                    text: "box.status.resolving-path"
                 });
+
+                this.box.resolveFile(filename)
+                    .then(file_id => {
+                        this.status({fill:"blue",shape:"dot",text:"box.status.downloading"});
+                        return this.box.download(file_id, downloadAs)
+                            .then(content => {
+                                msg.payload = content;
+                                delete msg.error;
+                                this.status({});
+                                this.send(msg); 
+                            })
+                            .catch(err => {
+                                this.error(RED._("box.error.download-failed",{
+                                    err:err.toString()
+                                }), msg);
+                                this.status({fill:"red",shape:"ring",text:"box.status.failed"});
+                            });
+                    }, err => {
+                        this.error(RED._("box.error.path-resolve-failed", {
+                            err:err.toString()
+                        }), msg);
+                        this.status({fill:"red",shape:"ring",text:"box.status.failed"});
+                    });
             });
-        });
+        }
     }
-    RED.nodes.registerType("box", BoxQueryNode);
+    RED.nodes.registerType("box", BoxDownloadNode);
 
     function BoxOutNode(n) {
         RED.nodes.createNode(this,n);
@@ -686,7 +598,7 @@ module.exports = function(RED) {
         this.localFilename = n.localFilename || "";
         this.box = RED.nodes.getNode(n.box);
         var node = this;
-        if (!this.box || !this.box.credentials.accessToken) {
+        if (!this.box || !this.box.hasCredentials) {
             this.warn(RED._("box.warn.missing-credentials"));
             return;
         }
@@ -747,11 +659,7 @@ module.exports = function(RED) {
                     node.status({});
                 });
                 var form = r.form();
-                if (localFilename) {
-                    form.append('filename', fs.createReadStream(localFilename), { filename: basename });
-                } else {
-                    form.append('filename', RED.util.ensureBuffer(msg.payload), { filename: basename });
-                }
+                form.append('filename', localFilename ? fs.createReadStream(localFilename) : RED.util.ensureBuffer(msg.payload), { filename: basename });
                 form.append('parent_id', parent_id);
             });
         });

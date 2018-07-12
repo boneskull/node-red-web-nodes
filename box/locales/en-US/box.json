@@ -12,8 +12,7 @@
             "secret": "Secret",
             "authenticate": "Authenticate with Box",
             "boxuser": "Box User",
-            "interval": "Polling Interval (seconds)",
-            "longpolling": "Real-Time Updates?"
+            "interval": "Polling Interval (seconds)"
         },
         "placeholder": {
             "pattern": "Filepattern",
@@ -33,12 +32,13 @@
             "downloading": "downloading",
             "uploading": "uploading",
             "overwriting": "overwriting",
-            "waiting": "waiting"
+            "listening": "listening",
+            "new-event": "new event"
         },
         "warn": {
             "refresh-token": "trying to refresh token due to expiry",
             "refresh-401": "refreshing access token after 401 error",
-            "missing-credentials": "Missing box credentials",
+            "missing-credentials": "missing credentials",
             "old-path-failed": "failed to resolve old path: __err__"
         },
         "error": {
@@ -54,12 +54,14 @@
             "too-many-refresh-attempts": "too many refresh attempts, giving up",
             "something-broke": "Something went wrong in the authentication process. Please try again.",
             "event-stream-initialize-failed": "failed to initialize event stream: __err__",
-            "events-fetch-failed": "failed to fetch events: __err__",
+            "event-fetch-failed": "failed to fetch event: __err__",
             "no-filename-specified": "No filename specified",
             "path-resolve-failed": "failed to resolve path: __err__",
             "download-failed": "download failed: __err__",
-            "upload-failed": "failed upload: __err__",
-            "long-polling-failed": "long-polling request failed: __err__"
+            "upload-failed": "failed upload: __err__"
+        },
+        "debug": {
+            "filtered": "skipping file __fullPath__; does not match filter __filepattern__"
         }
     }
 }

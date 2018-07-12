@@ -25,17 +25,45 @@
             <p style="margin-top: 10px;"><b>2.</b> <span data-i18n="box.label.copy"></span>:</p>
         </div>
         <div class="form-row">
+            <label for="node-config-input-authMode"><i class="fa fa-wrench"></i> Authentication Type</label>
+            <select id="node-config-input-authMode"></select>
+        </div>
+        <div class="form-row node-box-auth-mode-app node-box-auth-mode-oauth2">
             <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-clientId"><i class="fa fa-user"></i> <span data-i18n="box.label.clientid"></span></label>
-            <input type="password" id="node-config-input-clientId">
+            <input type="text" id="node-config-input-clientId"/>
         </div>
-        <div class="form-row">
+        <div class="form-row node-box-auth-mode-app node-box-auth-mode-oauth2">
             <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-clientSecret"><i class="fa fa-key"></i> <span data-i18n="box.label.secret"></span></label>
-            <input type="password" id="node-config-input-clientSecret">
+            <input type="password" id="node-config-input-clientSecret"/>
         </div>
-        <div class="form-row">
+        <div class="form-row node-box-auth-mode-oauth2">
            <label>&nbsp;</label>
            <a class="btn" id="node-config-start-auth" href="#" target="_blank"><span data-i18n="box.label.authenticate"></span></a>
         </div>
+        <div class="form-row node-box-auth-mode-app">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-enterprise"><i class="fa fa-user"></i> Enterprise?</label>
+            <input type="checkbox" id="node-config-input-enterprise"/>
+        </div>
+        <div class="form-row node-box-auth-mode-app node-box-auth-mode-app-enterprise">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-appEnterpriseId"><i class="fa fa-user"></i> App Enterprise ID</label>
+            <input type="text" id="node-config-input-appEnterpriseId"/>
+        </div>
+        <div class="form-row node-box-auth-mode-app node-box-auth-mode-app-user">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-appUserId"><i class="fa fa-user"></i> App User ID</label>
+            <input type="text" id="node-config-input-appUserId"/>
+        </div>
+        <div class="form-row node-box-auth-mode-app">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-publicKeyId"><i class="fa fa-user"></i> Public Key ID</label>
+            <input type="text" id="node-config-input-publicKeyId"/>
+        </div>
+        <div class="form-row node-box-auth-mode-app">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-privateKey"><i class="fa fa-key"></i> Private Key</label>
+            <textarea id="node-config-input-privateKey"/>
+        </div>
+        <div class="form-row node-box-auth-mode-app">
+            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-passphrase"><i class="fa fa-key"></i> Passphrase</label>
+            <input type="password" id="node-config-input-passphrase"/>
+        </div>        
     </div>
     <div id="node-config-box">
         <div class="form-row">
@@ -47,15 +75,30 @@
 
 <script type="text/javascript">
 (function() {
+    'use strict';
+
+    var AUTH_MODES = {
+        OAUTH2: 'OAuth2',
+        APP: 'App (JWT)',
+        DEV: 'Developer Token'
+    };
+
     RED.nodes.registerType('box-credentials',{
         category: 'config',
         defaults: {
-            displayName: {value:""}
+            displayName: {value:""},
+            authMode: {value: 'OAUTH2'},
+            enterprise: {value: false}
         },
         credentials: {
             displayName: {type:"text"},
-            clientId: { type: "password"},
-            clientSecret: { type: "password"}
+            clientId: { type: "text"},
+            clientSecret: { type: "password"},
+            publicKeyId: {type: 'text'},
+            privateKey: {type: 'password'},
+            passphrase: {type: 'password'},
+            appEnterpriseId: {type: 'text'},
+            appUserId: {type: 'text'}
         },
         label: function() {
             return this.displayName || 'Box';
@@ -63,6 +106,7 @@
         exportable: false,
         oneditprepare: function() {
             var id = this.id;
+            var node = this;
             var pathname = document.location.pathname;
             if (pathname.slice(-1) != "/") {
                 pathname += "/";
@@ -98,10 +142,46 @@
                         window.boxConfigNodeIntervalId = window.setTimeout(pollBoxCredentials,2000);
                     }
                 });
-             }
+            }
+
+            function setupAuthMode () {
+                $('#node-config-input-authMode').append(
+                    Object.keys(AUTH_MODES).map(function(value) {
+                        return '<option value="' + value + '">' + AUTH_MODES[value] + '</option>';
+                    })
+                )
+                    .val(node.authMode)
+                    .on('change', updateAuthMode);
+                $('#node-config-input-enterprise').prop('checked', node.enterprise ? 'on' : 'off')
+                    .on('change', updateAuthMode);
+            }
+
+            function updateAuthMode() {
+                switch ($('#node-config-input-authMode').val()) {
+                    case 'OAUTH2':
+                        $('.node-box-auth-mode-app:not(.node-box-auth-mode-oauth2)').hide();
+                        $('.node-box-auth-mode-oauth2:not(.node-box-auth-mode-app)').show();
+                        console.log('was OAUTH2');
+                        break;
+                    case 'APP':
+                        $('.node-box-auth-mode-app:not(.node-box-auth-mode-oauth2)').show();
+                        $('.node-box-auth-mode-oauth2:not(.node-box-auth-mode-app)').hide();
+                        // add enterprise toggle
+                        if ($('#node-config-input-enterprise').prop('checked')) {
+                            $('.node-box-auth-mode-app-user').hide().val('');
+                            $('.node-box-auth-mode-app-enterprise').show();
+                        } else {
+                            $('.node-box-auth-mode-app-user').show();
+                            $('.node-box-auth-mode-app-enterprise').hide().val('');
+                        }
+                        break;
+                    default:
+                        console.log('whatever')
+                }
+            }
 
             // we can't get this from the backend safely; if user needs
-            // to re-auth, it must be put in again.
+            // to re-auth, it must be entered again.
             $('#node-config-input-clientSecret').val('');
 
             updateBoxAuthButton();
@@ -126,6 +206,9 @@
                     e.preventDefault();
                 }
             });
+
+            setupAuthMode();
+            updateAuthMode();
         },
         oneditsave: function() {
             if (window.boxConfigNodeIntervalId) {
@@ -157,10 +240,6 @@
         <input type="number" id="node-input-interval"/>
     </div>
     <div class="form-row">
-        <label for="node-input-longpolling"><i class="fa fa-rocket"></i> <span data-i18n="box.label.longpolling"></span></label>
-        <input type="checkbox" id="node-input-longpolling"/>
-    </div>    
-    <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
         <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
     </div>
@@ -176,6 +255,11 @@
     returned by
     the <a href="https://developers.box.com/docs/#events">event
     API</a> in <b>msg.data</b>.</p>
+
+    The stream used will either be a "user" stream or an "enterprise"
+    stream, depending on the authentication mode used.  "Enterprise" streams
+    have a default polling interval of 60 seconds; "user" streams can emit
+    events at most once per second.  "User" streams are automatically deduped.
 </script>
 
 <script type="text/javascript">
@@ -186,19 +270,15 @@
             box: {type:"box-credentials",required:true},
             filepattern: {value:""},
             name: {value:""},
-            longpolling: {value: false},
-            interval: {value: 600}
+            interval: {value: ""}
         },
         inputs:0,
         outputs:1,
         icon: "box.png",
         label: function() {
-            return this.name||this.filepattern||'Box';
+            return this.name||this.filepattern||'Box Events';
         },
         oneditprepare: function() {
-            $('#node-input-longpolling').change(function () {
-                $('#node-input-interval').prop('disabled', $(this).prop('checked'));
-            });
         }
     });
 </script>
@@ -213,6 +293,11 @@
          <input type="text" id="node-input-filename" data-i18n="[placeholder]box.placeholder.filename">
     </div>
     <div class="form-row">
+        <label for="node-input-downloadAs"><i class="fa fa-download"></i> <span>Download As</span></label>
+        <select id="node-input-downloadAs">
+        </select>
+    </div>
+    <div class="form-row">
         <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
         <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
     </div>
@@ -223,21 +308,43 @@
 </script>
 
 <script type="text/javascript">
-    RED.nodes.registerType('box',{
-        category: 'storage-input',
-        color:"#C0DEED",
-        defaults: {
-            box: {type:"box-credentials",required:true},
-            filename: {value:""},
-            name: {value:""}
-        },
-        inputs:1,
-        outputs:1,
-        icon: "box.png",
-        label: function() {
-            return this.name||this.filename||'Box';
-        }
-    });
+    (function() {
+        'use strict';
+        
+        var DOWNLOAD_TYPES = {
+            RAW: 'Raw',
+            EXTRACTED_TEXT: 'Text',
+            PDF: 'PDF',
+            THUMBNAIL: 'Thumbnail Image',
+            IMAGE_MEDIUM: 'Medium Image',
+            IMAGE_LARGE: 'Large Image'
+        };
+
+        RED.nodes.registerType('box',{
+            category: 'storage-input',
+            color:"#C0DEED",
+            defaults: {
+                box: {type:"box-credentials",required:true},
+                filename: {value:""},
+                name: {value:""},
+                downloadAs: {value: 'RAW'}
+            },
+            inputs:1,
+            outputs:1,
+            icon: "box.png",
+            label: function() {
+                return this.name||this.filename||'Box';
+            },
+            oneditprepare: function() {
+                $('#node-input-downloadAs').append(
+                    Object.keys(DOWNLOAD_TYPES).map(function(value) {
+                        return '<option value="' + value + '">' + DOWNLOAD_TYPES[value] + '</option>';
+                    })
+                )
+                    .val(this.downloadAs);
+            }
+        });
+    }());
 </script>
 
 <script type="text/x-red" data-template-name="box out">

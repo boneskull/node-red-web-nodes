@@ -5,20 +5,28 @@
             "pattern": "Filename Pattern",
             "name": "Name",
             "filename": "Filename",
+            "fileId": "File ID",
             "local": "Local Filename",
             "create": "Create your own app at",
             "copy": "Copy the project credentials here",
-            "clientid": "Client Id",
+            "clientid": "Client ID",
             "secret": "Secret",
             "authenticate": "Authenticate with Box",
             "boxuser": "Box User",
-            "interval": "Polling Interval (seconds)"
+            "interval": "Polling Interval (seconds)",
+            "folderId": "Folder ID",
+            "limit": "Limit",
+            "offset": "Offset"
         },
         "placeholder": {
             "pattern": "Filepattern",
             "name": "Name",
             "filename": "Filename",
-            "local": "Local Filename"
+            "local": "Local Filename",
+            "folderId": "0",
+            "limit": "25",
+            "offset": "0",
+            "fileId": "000000000"
         },
         "tip": {
             "redirect": "<p>Please configure the authorized <b>Redirect URIs</b> of your app to include the following url:</p>\n<code>__callback__</code>"
@@ -33,7 +41,8 @@
             "uploading": "uploading",
             "overwriting": "overwriting",
             "listening": "listening",
-            "new-event": "new event"
+            "new-event": "new event",
+            "listing": "listing"
         },
         "warn": {
             "refresh-token": "trying to refresh token due to expiry",
@@ -55,10 +64,11 @@
             "something-broke": "Something went wrong in the authentication process. Please try again.",
             "event-stream-initialize-failed": "failed to initialize event stream: __err__",
             "event-fetch-failed": "failed to fetch event: __err__",
-            "no-filename-specified": "No filename specified",
+            "no-filename-specified": "No filename or file ID specified",
             "path-resolve-failed": "failed to resolve path: __err__",
             "download-failed": "download failed: __err__",
-            "upload-failed": "failed upload: __err__"
+            "upload-failed": "failed upload: __err__",
+            "listing-failed": "failed listing folder: __err__"
         },
         "debug": {
             "filtered": "skipping file __fullPath__; does not match filter __filepattern__"

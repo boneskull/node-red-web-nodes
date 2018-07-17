@@ -41,14 +41,10 @@
            <a class="btn" id="node-config-start-auth" href="#" target="_blank"><span data-i18n="box.label.authenticate"></span></a>
         </div>
         <div class="form-row node-box-auth-mode-app">
-            <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-enterprise"><i class="fa fa-user"></i> Enterprise?</label>
-            <input type="checkbox" id="node-config-input-enterprise"/>
-        </div>
-        <div class="form-row node-box-auth-mode-app node-box-auth-mode-app-enterprise">
             <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-appEnterpriseId"><i class="fa fa-user"></i> App Enterprise ID</label>
             <input type="text" id="node-config-input-appEnterpriseId"/>
         </div>
-        <div class="form-row node-box-auth-mode-app node-box-auth-mode-app-user">
+        <div class="form-row node-box-auth-mode-app">
             <label style="margin-left: 10px; margin-right: -10px;" for="node-config-input-appUserId"><i class="fa fa-user"></i> App User ID</label>
             <input type="text" id="node-config-input-appUserId"/>
         </div>
@@ -87,8 +83,7 @@
         category: 'config',
         defaults: {
             displayName: {value:""},
-            authMode: {value: 'OAUTH2'},
-            enterprise: {value: false}
+            authMode: {value: 'OAUTH2'}
         },
         credentials: {
             displayName: {type:"text"},
@@ -152,8 +147,6 @@
                 )
                     .val(node.authMode)
                     .on('change', updateAuthMode);
-                $('#node-config-input-enterprise').prop('checked', node.enterprise ? 'on' : 'off')
-                    .on('change', updateAuthMode);
             }
 
             function updateAuthMode() {
@@ -166,17 +159,7 @@
                     case 'APP':
                         $('.node-box-auth-mode-app:not(.node-box-auth-mode-oauth2)').show();
                         $('.node-box-auth-mode-oauth2:not(.node-box-auth-mode-app)').hide();
-                        // add enterprise toggle
-                        if ($('#node-config-input-enterprise').prop('checked')) {
-                            $('.node-box-auth-mode-app-user').hide().val('');
-                            $('.node-box-auth-mode-app-enterprise').show();
-                        } else {
-                            $('.node-box-auth-mode-app-user').show();
-                            $('.node-box-auth-mode-app-enterprise').hide().val('');
-                        }
                         break;
-                    default:
-                        console.log('whatever')
                 }
             }
 
@@ -288,10 +271,14 @@
         <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
         <input type="text" id="node-input-box">
     </div>
-    <div class="form-row node-input-filename">
+    <div class="form-row">
          <label for="node-input-filename"><i class="fa fa-file"></i> <span data-i18n="box.label.filename"></span></label>
          <input type="text" id="node-input-filename" data-i18n="[placeholder]box.placeholder.filename">
     </div>
+    <div class="form-row">
+        <label for="node-input-fileId"><i class="fa fa-file"></i> <span data-i18n="box.label.fileId"></span></label>
+        <input type="number" id="node-input-fileId" data-i18n="[placeholder]box.placeholder.fileId">
+   </div>
     <div class="form-row">
         <label for="node-input-downloadAs"><i class="fa fa-download"></i> <span>Download As</span></label>
         <select id="node-input-downloadAs">
@@ -326,6 +313,7 @@
             defaults: {
                 box: {type:"box-credentials",required:true},
                 filename: {value:""},
+                fileId: {value:""},
                 name: {value:""},
                 downloadAs: {value: 'RAW'}
             },
@@ -333,7 +321,7 @@
             outputs:1,
             icon: "box.png",
             label: function() {
-                return this.name||this.filename||'Box';
+                return this.name||this.filename||'Box Download';
             },
             oneditprepare: function() {
                 $('#node-input-downloadAs').append(
@@ -391,4 +379,58 @@
             return this.name||this.filename||this.localFilename||'Box';
         }
     });
+</script>
+
+<script type="text/x-red" data-template-name="box-items">
+    <div class="form-row">
+        <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
+        <input type="text" id="node-input-box">
+    </div>
+    <div class="form-row node-input-folderId">
+         <label for="node-input-folderId"><i class="fa fa-folder"></i> <span data-i18n="box.label.folderId"></span></label>
+         <input type="number" id="node-input-folderId" data-i18n="[placeholder]box.placeholder.folderId">
+    </div>
+    <div class="form-row node-input-limit">
+        <label for="node-input-limit"><i class="fa fa-weight"></i> <span data-i18n="box.label.limit"></span></label>
+        <input type="number" id="node-input-limit" data-i18n="[placeholder]box.placeholder.limit">
+    </div>
+    <div class="form-row node-input-offset">
+        <label for="node-input-offset"><i class="fa fa-hashtag"></i> <span data-i18n="box.label.offset"></span></label>
+        <input type="number" id="node-input-offset" data-i18n="[placeholder]box.placeholder.offset">
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="box-items">
+    <p>Box folder listing Node. Returns a payload containing information about the items in the folder as specified by the <strong>Folder ID</strong>.  It can be provided via the <code>msg.folderId</code> property of an incoming message.</p>
+
+    <p>The <strong>Limit</strong> property (<code>msg.limit</code>) determines the maximum count of items to return at once.  The <strong>Offset</strong> property (<code>msg.offset</code>) determines at which index to begin.  Use these for pagination.</p>
+    
+    <p>The default <strong>Folder ID</strong> is <code>0</code>, which corresponds to the root "All Files" folder.</p>
+</script>
+
+<script type="text/javascript">
+    (function() {
+        'use strict';
+        
+        RED.nodes.registerType('box-items',{
+            category: 'storage-input',
+            color:"#C0DEED",
+            defaults: {
+                box: {type:"box-credentials",required:true},
+                folderId: {value:""},
+                limit: {value: ""},
+                offset: {value: ""}
+            },
+            inputs:1,
+            outputs:1,
+            icon: "box.png",
+            label: function() {
+                return this.name||this.filename||'Box Folder Items';
+            }
+        });
+    }());
 </script>

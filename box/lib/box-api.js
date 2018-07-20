@@ -101,7 +101,7 @@ module.exports = RED => {
         OAUTH2: {
             /**
              * `true` if the credentials are in place 
-             * @this BoxCredentialsNode
+             * @this BoxAPINode
              * @returns {boolean} Credentials OK
              */
             _hasCredentials() {
@@ -157,7 +157,7 @@ module.exports = RED => {
         APP: {
             /**
              * `true` if the credentials are in place 
-             * @this BoxCredentialsNode
+             * @this BoxAPINode
              * @returns {boolean} Credentials OK
              */
             _hasCredentials() {
@@ -224,7 +224,7 @@ module.exports = RED => {
         DEV: {
             /**
              * `true` if the credentials are in place 
-             * @this BoxCredentialsNode
+             * @this BoxAPINode
              * @returns {boolean} Credentials OK
              */
             _hasCredentials() {
@@ -252,19 +252,23 @@ module.exports = RED => {
         }
     };
 
+
     /**
      * Represents an interface into the Box API; contains credentials.
      * Requires a mixin applied from `AuthModeMixins` to work properly;
      * the `authMode` property determines this.
+     * @class BoxAPINode
      */
     class BoxAPINode {
+        /**
+         * Creates an instance of BoxAPINode.
+         * @param {*} n
+         * @memberof BoxAPINode
+         */
         constructor(n) {
             RED.nodes.createNode(this, n);
 
-            /**
-             * @memberof BoxAPINode
-             * @type string
-             */
+            
             this.authMode = n.authMode || 'OAUTH2';
 
             if (!AuthModeMixins[this.authMode]) {
@@ -277,7 +281,8 @@ module.exports = RED => {
 
         /**
          * The TokenStore associated with this Node
-         * @type TokenStore
+         * @type {TokenStore}
+         * @memberof BoxAPINode
          */
         get tokenStore() {
             const tokenStore = this._tokenStore;
@@ -289,21 +294,24 @@ module.exports = RED => {
         }
 
         /**
-         * @type BoxSDKNode
+         * @type {BoxSDKNode}
+         * @memberof BoxAPINode
          */
         get sdk() {
             return this._sdk();
         }
 
         /**
-         * @type BoxClient
+         * @type {BoxClient}
+         * @memberof BoxAPINode
          */
         get client() {
             return this._client();
         }
 
         /**
-         * @type boolean
+         * @type {boolean}
+         * @memberof BoxAPINode
          */
         get hasCredentials() {
             return this._hasCredentials();

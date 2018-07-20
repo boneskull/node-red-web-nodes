@@ -30,7 +30,7 @@ module.exports = RED => {
             this.offset = n.offset || DEFAULT_OFFSET;
 
             /**
-             * @type BoxCredentialsNode
+             * @type {BoxAPINode}
              */
             this.box = RED.nodes.getNode(n.box);
             if (!this.box || !this.box.hasCredentials) {

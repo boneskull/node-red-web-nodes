@@ -37,7 +37,7 @@ module.exports = RED => {
             this.filepattern = n.filepattern || "";
             this.interval = n.interval || "";
             /**
-             * @type BoxCredentialsNode
+             * @type {BoxAPINode}
              **/
             this.box = RED.nodes.getNode(n.box);
 

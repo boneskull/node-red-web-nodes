@@ -435,3 +435,153 @@
         });
     }());
 </script>
+
+<script type="text/x-red" data-template-name="box-metadata">
+    <div class="form-row">
+        <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
+        <input type="text" id="node-input-box">
+    </div>
+    <div class="form-row node-input-fileId">
+         <label for="node-input-fileId"><i class="fa fa-file"></i> <span data-i18n="box.label.fileId"></span></label>
+         <input type="number" id="node-input-fileId" data-i18n="[placeholder]box.placeholder.fileId">
+    </div>
+    <div class="form-row node-input-templateKey">
+        <label for="node-input-templateKey"><i class="fa fa-key"></i> <span data-i18n="box.label.templateKey"></span></label>
+        <input type="number" id="node-input-templateKey" data-i18n="[placeholder]box.placeholder.templateKey">
+    </div>
+    <div class="form-row node-input-scope">
+        <label for="node-input-scope"><i class="fa fa-globe"></i> <span data-i18n="box.label.scope"></span></label>
+        <select id="node-input-scope">
+            <option value="ENTERPRISE" data-i18n="box.option.enterprise"></option>
+            <option value="GLOBAL" data-i18n="box.option.global"></option>
+        </select>
+    </div>
+    <div class="form-row node-input-metadata" style="margin-bottom: 0">
+        <label for="node-input-metadata"><i class="fa fa-info"></i> <span data-i18n="box.label.metadata"></span></label>
+        <input type="hidden" id="node-input-metadata"/>
+    </div>
+    <div class="form-row node-text-editor-row">
+        <div style="height: 250px; min-height:150px;" class="node-text-editor" id="node-input-metadata-editor"></div>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="box-metadata">
+    
+</script>
+
+<script type="text/javascript">
+    (function() {
+        'use strict';
+        
+        RED.nodes.registerType('box-metadata',{
+            category: 'storage-input',
+            color:"#C0DEED",
+            defaults: {
+                box: {type:"box-credentials",required:true},
+                metadata: {value: ""},
+                templateKey: {value: ""},
+                scope: {value: "ENTERPRISE"},
+                fileId: {value: ""}
+            },
+            inputs:1,
+            outputs:1,
+            icon: "box.png",
+            label: function() {
+                return this.name||this.filename||'Box Metadata';
+            },
+            oneditprepare: function () {
+                this.editor = RED.editor.createEditor({
+                    id: 'node-input-metadata-editor',
+                    mode: 'ace/mode/json',
+                    value: $("#node-input-metadata").val()
+                });
+                this.editor.focus();
+            },
+            oneditsave: function () {
+                $('#node-input-metadata').val(this.editor.getValue());
+                this.editor.destroy();
+                delete this.editor;
+            },
+            oneditcancel: function () {
+                this.editor.destroy();
+                delete this.editor;
+            },
+            oneditresize: function () {
+                this.editor.resize();
+            }
+        });
+    }());
+</script>
+
+
+<script type="text/x-red" data-template-name="box-update-file-info">
+    <div class="form-row">
+        <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
+        <input type="text" id="node-input-box">
+    </div>
+    <div class="form-row node-input-fileId">
+         <label for="node-input-fileId"><i class="fa fa-file"></i> <span data-i18n="box.label.fileId"></span></label>
+         <input type="number" id="node-input-fileId" data-i18n="[placeholder]box.placeholder.fileId">
+    </div>
+    <div class="form-row node-input-data" style="margin-bottom: 0">
+        <label for="node-input-data"><i class="fa fa-info"></i> <span data-i18n="box.label.data"></span></label>
+        <input type="hidden" id="node-input-data"/>
+    </div>
+    <div class="form-row node-text-editor-row">
+        <div style="height: 250px; min-height:150px;" class="node-text-editor" id="node-input-data-editor"></div>
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="box-update-file-info">
+    
+</script>
+
+<script type="text/javascript">
+    (function() {
+        'use strict';
+        
+        RED.nodes.registerType("box-update-file-info",{
+            category: 'storage-input',
+            color:"#C0DEED",
+            defaults: {
+                box: {type:"box-credentials",required:true},
+                data: {value: ""},
+                fileId: {value: ""}
+            },
+            inputs:1,
+            outputs:1,
+            icon: "box.png",
+            label: function() {
+                return this.name||this.filename||'Box File Info';
+            },
+            oneditprepare: function () {
+                this.editor = RED.editor.createEditor({
+                    id: 'node-input-data-editor',
+                    mode: 'ace/mode/json',
+                    value: $("#node-input-data").val()
+                });
+                this.editor.focus();
+            },
+            oneditsave: function () {
+                $('#node-input-data').val(this.editor.getValue());
+                this.editor.destroy();
+                delete this.editor;
+            },
+            oneditcancel: function () {
+                this.editor.destroy();
+                delete this.editor;
+            },
+            oneditresize: function () {
+                this.editor.resize();
+            }
+        });
+    }());
+</script>

@@ -16,7 +16,11 @@
             "interval": "Polling Interval (seconds)",
             "folderId": "Folder ID",
             "limit": "Limit",
-            "offset": "Offset"
+            "offset": "Offset",
+            "templateKey": "Template Key",
+            "scope": "Scope",
+            "metadata": "Metadata (JSON)",
+            "data": "File Data (JSON)"
         },
         "placeholder": {
             "pattern": "Filepattern",
@@ -26,7 +30,8 @@
             "folderId": "0",
             "limit": "25",
             "offset": "0",
-            "fileId": "000000000"
+            "fileId": "000000000",
+            "templateKey": "key-name"
         },
         "tip": {
             "redirect": "<p>Please configure the authorized <b>Redirect URIs</b> of your app to include the following url:</p>\n<code>__callback__</code>"
@@ -42,7 +47,9 @@
             "overwriting": "overwriting",
             "listening": "listening",
             "new-event": "new event",
-            "listing": "listing"
+            "listing": "listing",
+            "adding-metadata": "adding metadata",
+            "updating-file": "updating file info"
         },
         "warn": {
             "refresh-token": "trying to refresh token due to expiry",
@@ -68,10 +75,18 @@
             "path-resolve-failed": "failed to resolve path: __err__",
             "download-failed": "download failed: __err__",
             "upload-failed": "failed upload: __err__",
-            "listing-failed": "failed listing folder: __err__"
+            "listing-failed": "failed listing folder: __err__",
+            "no-template-key-specified": "required template key not specified",
+            "invalid-scope": "invalid metadata scope; must be GLOBAL or ENTERPRISE",
+            "add-metadata-failed": "adding metadata failed: __err__",
+            "update-file-failed": "updating file data failed: __err__"
         },
         "debug": {
             "filtered": "skipping file __fullPath__; does not match filter __filepattern__"
+        },
+        "option": {
+            "enterprise": "Enterprise",
+            "global": "Global"
         }
     }
 }

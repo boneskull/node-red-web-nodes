@@ -29,7 +29,7 @@ module.exports = RED => {
             this.fileId = n.fileId;
 
             /**
-             * @type BoxCredentialsNode
+             * @type {BoxAPINode}
              */
             this.box = RED.nodes.getNode(n.box);
 

@@ -469,55 +469,6 @@
     </div>
 </script>
 
-<script type="text/x-red" data-help-name="box-metadata">
-    
-</script>
-
-<script type="text/javascript">
-    (function() {
-        'use strict';
-        
-        RED.nodes.registerType('box-metadata',{
-            category: 'storage-input',
-            color:"#C0DEED",
-            defaults: {
-                box: {type:"box-credentials",required:true},
-                metadata: {value: ""},
-                templateKey: {value: ""},
-                scope: {value: "ENTERPRISE"},
-                fileId: {value: ""}
-            },
-            inputs:1,
-            outputs:1,
-            icon: "box.png",
-            label: function() {
-                return this.name||this.filename||'Box Metadata';
-            },
-            oneditprepare: function () {
-                this.editor = RED.editor.createEditor({
-                    id: 'node-input-metadata-editor',
-                    mode: 'ace/mode/json',
-                    value: $("#node-input-metadata").val()
-                });
-                this.editor.focus();
-            },
-            oneditsave: function () {
-                $('#node-input-metadata').val(this.editor.getValue());
-                this.editor.destroy();
-                delete this.editor;
-            },
-            oneditcancel: function () {
-                this.editor.destroy();
-                delete this.editor;
-            },
-            oneditresize: function () {
-                this.editor.resize();
-            }
-        });
-    }());
-</script>
-
-
 <script type="text/x-red" data-template-name="box-update-file-info">
     <div class="form-row">
         <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>

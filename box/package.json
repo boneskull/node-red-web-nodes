@@ -1,6 +1,6 @@
 {
     "name": "@boneskull/node-red-node-box",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "description": "Node-RED nodes to watch, download and save files to Box",
     "dependencies": {
         "box-node-sdk": "^1.19.0",

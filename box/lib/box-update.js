@@ -84,5 +84,5 @@ module.exports = RED => {
             });
         }
     }
-    RED.nodes.registerType("box-update-file-info", BoxUpdateFileInfoNode);
+    RED.nodes.registerType("box-set-file-info", BoxUpdateFileInfoNode);
 }

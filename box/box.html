@@ -247,7 +247,7 @@
 
 <script type="text/javascript">
     RED.nodes.registerType('box in',{
-        category: 'storage-input',
+        category: 'Box',
         color:"#C0DEED",
         defaults: {
             box: {type:"box-credentials",required:true},
@@ -262,7 +262,8 @@
             return this.name||this.filepattern||'Box Events';
         },
         oneditprepare: function() {
-        }
+        },
+        paletteLabel: 'box events'
     });
 </script>
 
@@ -291,7 +292,20 @@
 </script>
 
 <script type="text/x-red" data-help-name="box">
-    <p>Box input node. Downloads content from Box. The filename on Box is taken from the node <b>filename</b> property or the <b>msg.filename</b> property. The content is sent as <b>msg.payload</b> property.</p>
+    <p>Box input node. Downloads content from Box. The filename on Box is taken from the node <b>Filename</b> property or the <code>msg.filename</code> property.</p>
+
+    <p><strong>File ID</strong> (<code>msg.fileId</code>) is preferred over <strong>Filename</strong> (<code>msg.filename</code>), as it's faster to retrieve.</p>
+
+    The <strong>Download As</strong> value (<code>msg.downloadAs</code>) is a string, and can be one of:
+    <ul>
+        <li><code>RAW</code>: raw file; likely a <code>Buffer</code> or </code>string</code>.  This is the default.</li>
+        <li><code>EXTRACTED_TEXT</code>: text extracted from file; a <code>string</code></li>
+        <li><code>PDF</code>: the file converted into PDF format (if possible); a <code>Buffer</code></li>
+        <li><code>THUMBNAIL</code>: A thumbnail-sized image, if applicable; <code>Buffer</code></li>
+        <li><code>IMAGE_MEDIUM</code>: A medium-sized image, if applicable; <code>Buffer</code></li>
+        <li><code>IMAGE_LARGE</code>: A large-sized image, if applicable; <code>Buffer</code></li>
+    </ul>
+    <p>The resulting content is sent in <code>msg.payload</code>.</p>
 </script>
 
 <script type="text/javascript">
@@ -308,7 +322,7 @@
         };
 
         RED.nodes.registerType('box',{
-            category: 'storage-input',
+            category: 'Box',
             color:"#C0DEED",
             defaults: {
                 box: {type:"box-credentials",required:true},
@@ -330,56 +344,12 @@
                     })
                 )
                     .val(this.downloadAs);
-            }
+            },
+            paletteLabel: 'box download'
         });
     }());
 </script>
 
-<script type="text/x-red" data-template-name="box out">
-    <div class="form-row">
-        <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
-        <input type="text" id="node-input-box">
-    </div>
-    <div class="form-row node-input-filename">
-         <label for="node-input-filename"><i class="fa fa-file"></i> <span data-i18n="box.label.filename"></span></label>
-         <input type="text" id="node-input-filename" data-i18n="[placeholder]box.placeholder.filename">
-    </div>
-    <div class="form-row node-input-localFilename">
-         <label for="node-input-localFilename"><i class="fa fa-file"></i> <span data-i18n="box.label.local"></span></label>
-         <input type="text" id="node-input-localFilename" data-i18n="[placeholder]box.placeholder.local">
-    </div>
-    <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
-        <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
-    </div>
-</script>
-
-<script type="text/x-red" data-help-name="box out">
-    <p>Box out node. Uploads content to Box.</p>
-    <p>The filename on Box is taken from the node <b>filename</b> property or the <code>msg.filename</code> property.</p>
-    <p>The content is taken from either the file pointed at by the node <b>localFilename</b> property, the
-    <code>msg.localFilename</code> property, or the actual contents of the <code>msg.payload</code> property.</p>
-</script>
-
-<script type="text/javascript">
-    RED.nodes.registerType('box out',{
-        category: 'storage-output',
-        color:"#C0DEED",
-        defaults: {
-            box: {type:"box-credentials",required:true},
-            filename: {value:""},
-            localFilename: {value:""},
-            name: {value:""}
-        },
-        inputs:1,
-        outputs:0,
-        icon: "box.png",
-        align: "right",
-        label: function() {
-            return this.name||this.filename||this.localFilename||'Box';
-        }
-    });
-</script>
 
 <script type="text/x-red" data-template-name="box-items">
     <div class="form-row">
@@ -417,7 +387,7 @@
         'use strict';
         
         RED.nodes.registerType('box-items',{
-            category: 'storage-input',
+            category: 'Box',
             color:"#C0DEED",
             defaults: {
                 box: {type:"box-credentials",required:true},
@@ -431,9 +401,57 @@
             icon: "box.png",
             label: function() {
                 return this.name||this.filename||'Box Folder Items';
-            }
+            },
+            paletteLabel: 'box folder items'
         });
     }());
+</script>
+
+<script type="text/x-red" data-template-name="box out">
+    <div class="form-row">
+        <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
+        <input type="text" id="node-input-box">
+    </div>
+    <div class="form-row node-input-filename">
+         <label for="node-input-filename"><i class="fa fa-file"></i> <span data-i18n="box.label.filename"></span></label>
+         <input type="text" id="node-input-filename" data-i18n="[placeholder]box.placeholder.filename">
+    </div>
+    <div class="form-row node-input-localFilename">
+         <label for="node-input-localFilename"><i class="fa fa-file"></i> <span data-i18n="box.label.local"></span></label>
+         <input type="text" id="node-input-localFilename" data-i18n="[placeholder]box.placeholder.local">
+    </div>
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="box.label.name"></span></label>
+        <input type="text" id="node-input-name" data-i18n="[placeholder]box.placeholder.name">
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="box out">
+    <p>Box out node. Uploads content to Box.</p>
+    <p>The filename on Box is taken from the node <b>filename</b> property or the <code>msg.filename</code> property.</p>
+    <p>The content is taken from either the file pointed at by the node <b>localFilename</b> property, the
+    <code>msg.localFilename</code> property, or the actual contents of the <code>msg.payload</code> property.</p>
+</script>
+
+<script type="text/javascript">
+    RED.nodes.registerType('box out',{
+        category: 'Box',
+        color:"#C0DEED",
+        defaults: {
+            box: {type:"box-credentials",required:true},
+            filename: {value:""},
+            localFilename: {value:""},
+            name: {value:""}
+        },
+        inputs:1,
+        outputs:0,
+        icon: "box.png",
+        align: "right",
+        label: function() {
+            return this.name||this.filename||this.localFilename||'Box';
+        },
+        paletteLabel: 'box upload'
+    });
 </script>
 
 <script type="text/x-red" data-template-name="box-metadata">
@@ -469,7 +487,7 @@
     </div>
 </script>
 
-<script type="text/x-red" data-template-name="box-update-file-info">
+<script type="text/x-red" data-template-name="box-set-file-info">
     <div class="form-row">
         <label for="node-input-box"><i class="fa fa-user"></i> <span data-i18n="box.label.box"></span></label>
         <input type="text" id="node-input-box">
@@ -491,16 +509,18 @@
     </div>
 </script>
 
-<script type="text/x-red" data-help-name="box-update-file-info">
-    
+<script type="text/x-red" data-help-name="box-set-file-info">
+    <p>Updates a file's "info" in Box.  Accepts a <strong>File ID</strong> (<code>msg.fileId</code>).</p>
+    <p>The file info should be a JavaScript object.  Any properties therein are applied to the file, as supported.  This may be passed as <code>msg.data</code>, <code>msg.payload</code>, or hardcoded within the Node properties as valid JSON.</p>
+    <p>See the <a href="https://developer.box.com/v2.0/reference" target="_blank">Box API documentation</a> for more information about the format of this object.</p>
 </script>
 
 <script type="text/javascript">
     (function() {
         'use strict';
         
-            category: 'storage-input',
         RED.nodes.registerType("box-set-file-info",{
+            category: 'Box',
             color:"#C0DEED",
             defaults: {
                 box: {type:"box-credentials",required:true},
@@ -509,6 +529,7 @@
             },
             inputs:1,
             outputs:1,
+            align: 'right',
             icon: "box.png",
             label: function() {
                 return this.name||this.filename||'Box File Info';
@@ -532,7 +553,8 @@
             },
             oneditresize: function () {
                 this.editor.resize();
-            }
+            },
+            paletteLabel: 'box set file info'
         });
     }());
 </script>

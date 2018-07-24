@@ -18,7 +18,7 @@
 
 module.exports = RED => {
 
-    class BoxUpdateFileInfoNode {
+    class BoxSetFileInfoNode {
         /**
          * Creates an instance of BoxAddMetadataNode.
          * @param {*} n
@@ -84,5 +84,5 @@ module.exports = RED => {
             });
         }
     }
-    RED.nodes.registerType("box-set-file-info", BoxUpdateFileInfoNode);
+    RED.nodes.registerType("box-set-file-info", BoxSetFileInfoNode);
 }

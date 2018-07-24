@@ -22,7 +22,7 @@ const initEventNode = require('./lib/box-event');
 const initOAUth2 = require('./lib/box-oauth2');
 const initUploadNode = require('./lib/box-upload');
 const initItemsNode = require('./lib/box-items');
-const initFileInfoNode = require('./lib/box-update');
+const initFileInfoNode = require('./lib/box-set-file-info');
 
 module.exports = RED => {
     initAPINode(RED);
